@@ -1,11 +1,34 @@
 use serde::Deserialize;
-use std::fs;
+use std::{
+    fs,
+    collections::{HashMap, HashSet},
+    fmt::Write,
+    sync::Arc,
+};
 
 use serenity::{
     async_trait,
-    model::{channel::Message, gateway::Ready},
     prelude::*,
-    utils::MessageBuilder
+    utils::MessageBuilder,
+    framework::standard::{
+        buckets::{LimitedFor, RevertBucket},
+        help_commands,
+        macros::{check, command, group, help, hook},
+        Args,
+        CommandGroup,
+        CommandOptions,
+        CommandResult,
+        DispatchError,
+        HelpOptions,
+        Reason,
+        StandardFramework,
+    },
+    model::{
+        channel::{Channel, Message},
+        gateway::Ready,
+        id::UserId,
+        permissions::Permissions,
+    },
 };
 
 struct Handler;
@@ -61,9 +84,44 @@ impl EventHandler for Handler {
     }
 }
 
+#[group]
+#[commands(ping)]
+pub struct Meta;
+
+#[help]
+#[individual_command_tip = "If you want more information about a specific command, just pass the command as argument."]
+#[command_not_found_text = "Could not find: `{}`."]
+#[max_levenshtein_distance(3)]
+#[indention_prefix = " "]
+#[lacking_permissions = "Hide"]
+#[lacking_role = "Nothing"]
+#[wrong_channel = "Strike"]
+async fn my_help(
+    context: &Context,
+    msg: &Message,
+    args: Args,
+    help_options: &'static HelpOptions,
+    groups: &[&'static CommandGroup],
+    owners: HashSet<UserId>,
+) -> CommandResult {
+    let _ = help_commands::with_embeds(context, msg, args, help_options, groups, owners).await;
+    Ok(())
+}
+
+#[command]
+async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
+    if let Err(e) = msg.reply(ctx, "Pong!").await {
+        println!("error in msg: {:?}", e);
+    }
+
+    Ok(())
+}
+
+
 #[derive(Deserialize)]
 struct Config {
-    token: String
+    token: String,
+    prefix: String
 }
 
 #[tokio::main]
@@ -74,8 +132,20 @@ async fn main() {
         .expect("Cannot find config.toml"))
         .expect("Cannot parse config.toml");
     
-    let token = config.token;
-    let mut client = Client::builder(&token).event_handler(Handler).await.expect("Err creating client");
+    let token = &config.token;
+    
+    let framework = StandardFramework::new()
+        .configure(|c| c
+            .prefix(&config.prefix)
+        )
+        .help(&MY_HELP)
+        .group(&META_GROUP);
+
+    let mut client = Client::builder(token)
+        .event_handler(Handler)
+        .framework(framework)
+        .await
+        .expect("Err creating client");
 
     if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
