@@ -5,6 +5,7 @@ use serenity::{
     async_trait,
     model::{channel::Message, gateway::Ready},
     prelude::*,
+    utils::MessageBuilder
 };
 
 struct Handler;
@@ -13,14 +14,6 @@ struct Handler;
 impl EventHandler for Handler {
     async fn message(&self, context: Context, msg: Message) {
         if msg.content == "!me" {
-            // If the `utils`-feature is enabled, then model structs will
-            // have a lot of useful methods implemented, to avoid using an
-            // often otherwise bulky Context, or even much lower-level `rest`
-            // method.
-            //
-            // In this case, you can direct message a User directly by simply
-            // calling a method on its instance, with the content of the
-            // message.
             let dm = msg
                 .author
                 .dm(&context, |m| {
@@ -32,6 +25,33 @@ impl EventHandler for Handler {
 
             if let Err(why) = dm {
                 println!("Error when direct messaging user: {:?}", why);
+            }
+        }
+
+        if msg.content == "!ping" {
+            let channel = match msg.channel_id.to_channel(&context).await {
+                Ok(channel) => channel,
+                Err(why) => {
+                    println!("Error getting channel: {:?}", why);
+
+                    return;
+                },
+            };
+
+            // The message builder allows for creating a message by
+            // mentioning users dynamically, pushing "safe" versions of
+            // content (such as bolding normalized content), displaying
+            // emojis, and more.
+            let response = MessageBuilder::new()
+                .push("User ")
+                .push_bold_safe(&msg.author.name)
+                .push(" used the 'ping' command in the ")
+                .mention(&channel)
+                .push(" channel")
+                .build();
+
+            if let Err(why) = msg.channel_id.say(&context.http, &response).await {
+                println!("Error sending message: {:?}", why);
             }
         }
     }
