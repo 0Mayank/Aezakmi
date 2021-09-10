@@ -1,4 +1,5 @@
-use std::env;
+use serde::Deserialize;
+use std::fs;
 
 use serenity::{
     async_trait,
@@ -6,34 +7,31 @@ use serenity::{
     prelude::*,
 };
 
-// Serenity implements transparent sharding in a way that you do not need to
-// manually handle separate processes or connections manually.
-//
-// Transparent sharding is useful for a shared cache. Instead of having caches
-// with duplicated data, a shared cache means all your data can be easily
-// accessible across all shards.
-//
-// If your bot is on many guilds - or over the maximum of 2500 - then you
-// should/must use guild sharding.
-//
-// This is an example file showing how guild sharding works. For this to
-// properly be able to be seen in effect, your bot should be in at least 2
-// guilds.
-//
-// Taking a scenario of 2 guilds, try saying "!ping" in one guild. It should
-// print either "0" or "1" in the console. Saying "!ping" in the other guild,
-// it should cache the other number in the console. This confirms that guild
-// sharding works.
 struct Handler;
 
 #[async_trait]
 impl EventHandler for Handler {
-    async fn message(&self, ctx: Context, msg: Message) {
-        if msg.content == "!ping" {
-            println!("Shard {}", ctx.shard_id);
+    async fn message(&self, context: Context, msg: Message) {
+        if msg.content == "!me" {
+            // If the `utils`-feature is enabled, then model structs will
+            // have a lot of useful methods implemented, to avoid using an
+            // often otherwise bulky Context, or even much lower-level `rest`
+            // method.
+            //
+            // In this case, you can direct message a User directly by simply
+            // calling a method on its instance, with the content of the
+            // message.
+            let dm = msg
+                .author
+                .dm(&context, |m| {
+                    m.content("Hello!");
 
-            if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
-                println!("Error sending message: {:?}", why);
+                    m
+                })
+                .await;
+
+            if let Err(why) = dm {
+                println!("Error when direct messaging user: {:?}", why);
             }
         }
     }
@@ -43,20 +41,23 @@ impl EventHandler for Handler {
     }
 }
 
+#[derive(Deserialize)]
+struct Config {
+    token: String
+}
+
 #[tokio::main]
 async fn main() {
     // Configure the client with your Discord bot token in the environment.
-    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
-    let mut client =
-        Client::builder(&token).event_handler(Handler).await.expect("Err creating client");
+    let config: Config = toml::from_str(
+        &fs::read_to_string("./config.toml")
+        .expect("Cannot find config.toml"))
+        .expect("Cannot parse config.toml");
+    
+    let token = config.token;
+    let mut client = Client::builder(&token).event_handler(Handler).await.expect("Err creating client");
 
-    // The total number of shards to use. The "current shard number" of a
-    // shard - that is, the shard it is assigned to - is indexed at 0,
-    // while the total shard count is indexed at 1.
-    //
-    // This means if you have 5 shards, your total shard count will be 5, while
-    // each shard will be assigned numbers 0 through 4.
-    if let Err(why) = client.start_shards(2).await {
+    if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
     }
 }
