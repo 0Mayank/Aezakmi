@@ -1,9 +1,11 @@
+mod cogs;
+use cogs::meta::*;
+
+
 use serde::Deserialize;
 use std::{
     fs,
-    collections::{HashMap, HashSet},
-    fmt::Write,
-    sync::Arc,
+    collections::{HashSet}
 };
 
 use serenity::{
@@ -11,23 +13,18 @@ use serenity::{
     prelude::*,
     utils::MessageBuilder,
     framework::standard::{
-        buckets::{LimitedFor, RevertBucket},
         help_commands,
-        macros::{check, command, group, help, hook},
+        macros::{help},
         Args,
         CommandGroup,
-        CommandOptions,
         CommandResult,
-        DispatchError,
         HelpOptions,
-        Reason,
         StandardFramework,
     },
     model::{
-        channel::{Channel, Message},
+        channel::{Message},
         gateway::Ready,
         id::UserId,
-        permissions::Permissions,
     },
 };
 
@@ -84,9 +81,7 @@ impl EventHandler for Handler {
     }
 }
 
-#[group]
-#[commands(ping)]
-pub struct Meta;
+
 
 #[help]
 #[individual_command_tip = "If you want more information about a specific command, just pass the command as argument."]
@@ -108,16 +103,6 @@ async fn my_help(
     Ok(())
 }
 
-#[command]
-async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
-    if let Err(e) = msg.reply(ctx, "Pong!").await {
-        println!("error in msg: {:?}", e);
-    }
-
-    Ok(())
-}
-
-
 #[derive(Deserialize)]
 struct Config {
     token: String,
@@ -126,7 +111,7 @@ struct Config {
 
 #[tokio::main]
 async fn main() {
-    // Configure the client with your Discord bot token in the environment.
+    // Configure the client with your Discord bot token
     let config: Config = toml::from_str(
         &fs::read_to_string("./config.toml")
         .expect("Cannot find config.toml"))
@@ -137,6 +122,7 @@ async fn main() {
     let framework = StandardFramework::new()
         .configure(|c| c
             .prefix(&config.prefix)
+            .with_whitespace(true)
         )
         .help(&MY_HELP)
         .group(&META_GROUP);
