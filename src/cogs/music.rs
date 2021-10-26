@@ -1,7 +1,6 @@
 use serenity::framework::standard::{
     macros::{command, group},
-    CommandResult,
-    Args
+    Args, CommandResult,
 };
 use serenity::model::prelude::*;
 use serenity::prelude::*;

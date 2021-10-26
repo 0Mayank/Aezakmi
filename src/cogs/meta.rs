@@ -1,14 +1,15 @@
-use serenity::framework::standard::{
-    macros::{command, group},
-    CommandResult,
-    Args
+use serenity::{
+    framework::standard::{
+        macros::{command, group},
+        Args, CommandResult,
+    },
+    model::{oauth2::OAuth2Scope, prelude::*, Permissions},
+    prelude::*,
+    utils::{content_safe, Color, ContentSafeOptions},
 };
-use serenity::model::prelude::*;
-use serenity::prelude::*;
-use serenity::utils::{content_safe, ContentSafeOptions};
 
 #[group]
-#[commands(ping, say)]
+#[commands(ping, say, botinvite)]
 pub struct Meta;
 
 #[command]
@@ -32,12 +33,39 @@ async fn say(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             // as their display name.
             .display_as_member_from(guild_id)
     } else {
-        ContentSafeOptions::default().clean_channel(false).clean_role(false)
+        ContentSafeOptions::default()
+            .clean_channel(false)
+            .clean_role(false)
     };
 
     let content = content_safe(&ctx.cache, &args.rest(), &settings).await;
 
     msg.channel_id.say(&ctx.http, &content).await?;
+
+    Ok(())
+}
+
+#[command]
+#[aliases("invite")]
+async fn botinvite(ctx: &Context, msg: &Message) -> CommandResult {
+    let scopes = vec![OAuth2Scope::Bot];
+    let url = ctx
+        .cache
+        .current_user()
+        .await
+        .invite_url_with_oauth2_scopes(&ctx.http, Permissions::ADMINISTRATOR, &scopes)
+        .await?;
+
+    msg.channel_id
+        .send_message(&ctx.http, |m| {
+            m.reference_message(msg).embed(|e| {
+                e.title("Bot Invite Link")
+                    .url(url)
+                    .color(Color::new(64141))
+                    .description("Click the title to invite me to your server")
+            })
+        })
+        .await?;
 
     Ok(())
 }
