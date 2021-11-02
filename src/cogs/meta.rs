@@ -1,3 +1,9 @@
+use core::default::Default;
+use mongodb::{
+    bson::{doc, Document},
+    options::{FindOneAndUpdateOptions, FindOneOptions, InsertOneOptions},
+};
+
 use serenity::{
     framework::standard::{
         macros::{command, group},
@@ -8,8 +14,10 @@ use serenity::{
     utils::{content_safe, Color, ContentSafeOptions},
 };
 
+use crate::initialize_guild;
+
 #[group]
-#[commands(ping, say, botinvite)]
+#[commands(ping, say, botinvite, enable, disable, prefix)]
 pub struct Meta;
 
 #[command]
@@ -65,6 +73,75 @@ async fn botinvite(ctx: &Context, msg: &Message) -> CommandResult {
                     .description("Click the title to invite me to your server")
             })
         })
+        .await?;
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guild)]
+async fn enable(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let data = ctx.data.read().await;
+    let db = data.get::<crate::Db>().unwrap();
+    let collection = db.collection::<Document>("guilds");
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guild)]
+async fn disable(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let data = ctx.data.read().await;
+    let db = data.get::<crate::Db>().unwrap();
+    let collection = db.collection::<Document>("guilds");
+
+    Ok(())
+}
+
+#[command]
+#[max_args(1)]
+#[only_in(guild)]
+async fn prefix(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let data = ctx.data.read().await;
+    let db = data.get::<crate::Db>().unwrap();
+    let collection = db.collection::<Document>("guilds");
+
+    let guild_id = i64::from(msg.guild_id.unwrap());
+
+    let prefix = match args.single_quoted::<String>() {
+        Ok(prefix) => prefix,
+        Err(_) => {
+            msg.reply(
+                ctx,
+                format!(
+                    "current prefix is {}",
+                    collection
+                        .find_one(doc! {"_id": guild_id}, FindOneOptions::builder().build())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .get("prefix")
+                        .unwrap()
+                ),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    let filter = doc! {"_id": guild_id};
+    let update = doc! {"$set": {"prefix": &prefix}};
+    let options = FindOneAndUpdateOptions::builder().build();
+
+    let result = collection
+        .find_one_and_update(filter, update, options)
+        .await?;
+
+    if let None = result {
+        initialize_guild(&collection, guild_id, &prefix).await?;
+    }
+
+    msg.reply(ctx, format!("Prefix changed to \"{}\"", prefix))
         .await?;
 
     Ok(())
