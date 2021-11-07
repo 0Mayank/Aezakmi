@@ -9,11 +9,7 @@ use mongodb::{
     Collection,
 };
 use serde::Deserialize;
-use std::{
-    collections::HashSet,
-    fs,
-    future::{self, Future},
-};
+use std::{collections::HashSet, fs, future::Future};
 
 use serenity::{
     async_trait,
@@ -124,6 +120,7 @@ async fn main() {
                 .with_whitespace(true)
                 .no_dm_prefix(true)
                 .on_mention(Some(UserId(config.user_id)))
+                .delimiters(vec![", ", " ", " ,", ","])
         })
         .help(&MY_HELP)
         .group(&META_GROUP)
@@ -195,4 +192,44 @@ where
         Some(val) => val,
         None => def().await,
     }
+}
+
+#[macro_export]
+macro_rules! update_guild {
+    ($ctx:expr, $msg:expr, $update:expr) => {{
+        let collection = get_guilds!($ctx);
+        let guild_id = i64::from($msg.guild_id.unwrap());
+
+        let filter = doc! {"_id": guild_id};
+        let options = FindOneAndUpdateOptions::builder().build();
+
+        collection
+            .find_one_and_update(filter, $update, options)
+            .await?
+    }};
+}
+
+#[macro_export]
+macro_rules! view_guild {
+    ($ctx:expr, $msg:expr,$key:expr) => {{
+        let collection = get_guilds!($ctx);
+        let guild_id = i64::from($msg.guild_id.unwrap());
+
+        collection
+            .find_one(doc! {"_id": guild_id}, FindOneOptions::builder().build())
+            .await
+            .unwrap()
+            .unwrap()
+            .get($key)
+            .unwrap()
+    }};
+}
+
+#[macro_export]
+macro_rules! get_guilds {
+    ($ctx: expr) => {{
+        let data = $ctx.data.read().await;
+        let db = data.get::<crate::Db>().unwrap();
+        db.collection::<Document>("guilds")
+    }};
 }

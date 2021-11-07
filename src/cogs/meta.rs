@@ -1,7 +1,7 @@
 use core::default::Default;
 use mongodb::{
     bson::{doc, Document},
-    options::{FindOneAndUpdateOptions, FindOneOptions, InsertOneOptions},
+    options::{FindOneAndUpdateOptions, FindOneOptions},
 };
 
 use serenity::{
@@ -14,13 +14,87 @@ use serenity::{
     utils::{content_safe, Color, ContentSafeOptions},
 };
 
-use crate::initialize_guild;
+use crate::{get_guilds, update_guild, view_guild};
 
 #[group]
 #[commands(ping, say, botinvite, enable, disable, prefix)]
 pub struct Meta;
 
+struct FilteredArgs<'a> {
+    commands: Option<&'a [&'a str]>,
+    channels: Option<&'a [&'a str]>,
+    role_user: Option<&'a [&'a str]>,
+}
+
+#[macro_export]
+macro_rules! filter_to_FilteredArgs {
+    ($args:expr, $f:expr) => {
+        let args = $args.rest().split_whitespace();
+
+        let mut in_index = None;
+        let mut for_index = None;
+
+        for (index, arg) in args.clone().enumerate() {
+            if arg == "in" && in_index.is_none() {
+                in_index = Some(index);
+            } else if arg == "for" && for_index.is_none() {
+                for_index = Some(index);
+            }
+
+            if !in_index.is_none() && !for_index.is_none() {
+                break;
+            }
+        }
+
+        let args: Vec<_> = args.collect();
+
+        let filtered_args = if in_index.is_none() && for_index.is_none() {
+            FilteredArgs {
+                commands: Some(&args[..]),
+                channels: None,
+                role_user: None,
+            }
+        } else if in_index.is_none() {
+            let for_index = for_index.unwrap();
+            FilteredArgs {
+                commands: Some(&args[0..for_index]),
+                channels: None,
+                role_user: Some(&args[(for_index + 1)..]),
+            }
+        } else if for_index.is_none() {
+            let in_index = in_index.unwrap();
+            FilteredArgs {
+                commands: Some(&args[0..in_index]),
+                channels: Some(&args[(in_index + 1)..]),
+                role_user: None,
+            }
+        } else if in_index > for_index {
+            let in_index = in_index.unwrap();
+            let for_index = for_index.unwrap();
+            FilteredArgs {
+                commands: Some(&args[0..for_index]),
+                channels: Some(&args[(for_index + 1)..in_index]),
+                role_user: Some(&args[(in_index + 1)..]),
+            }
+        } else {
+            let in_index = in_index.unwrap();
+            let for_index = for_index.unwrap();
+            FilteredArgs {
+                commands: Some(&args[0..in_index]),
+                channels: Some(&args[(in_index + 1)..for_index]),
+                role_user: Some(&args[(for_index + 1)..]),
+            }
+        };
+
+        $f.commands = filtered_args.commands;
+        $f.channels = filtered_args.channels;
+        $f.role_user = filtered_args.role_user;
+    };
+}
+
 #[command]
+#[description = "Check if I am working"]
+#[usage = ""]
 async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
     if let Err(e) = msg.reply(ctx, "Pong!").await {
         println!("error in msg: {:?}", e);
@@ -54,6 +128,8 @@ async fn say(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 }
 
 #[command]
+#[description = "Get a link to invite me to your server"]
+#[usage = ""]
 #[aliases("invite")]
 async fn botinvite(ctx: &Context, msg: &Message) -> CommandResult {
     let scopes = vec![OAuth2Scope::Bot];
@@ -79,67 +155,72 @@ async fn botinvite(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 #[command]
+#[description = "Enable a command server-wide, or for a role, channel or user"]
+#[usage = "<command name> [Channel|Role|User] ..."]
+#[example = "ping"]
+#[example = "ping #general"]
 #[only_in(guild)]
 async fn enable(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let data = ctx.data.read().await;
-    let db = data.get::<crate::Db>().unwrap();
-    let collection = db.collection::<Document>("guilds");
+    // ae enable c1, c2, c3 .. in #ch1, #ch2, .. for r1, r2, u1, u2
+    // ae enable c1, c2, c3 .. in #ch1, #ch2, ..
+    let collection = get_guilds!(ctx);
+
+    let guild_id = i64::from(msg.guild_id.unwrap());
+
+    if args.is_empty() {
+        return Ok(());
+    }
+
+    let mut f = FilteredArgs {
+        commands: None,
+        channels: None,
+        role_user: None,
+    };
+
+    filter_to_FilteredArgs!(args, f);
+
+    println!("{:?}", f.commands);
+    println!("{:?}", f.channels);
+    println!("{:?}", f.role_user);
 
     Ok(())
 }
 
 #[command]
+#[description = "disable a command server-wide, or for a role, channel or user"]
+#[usage = "d<command name> [Channel|Role|User] ..."]
+#[example = "ping"]
+#[example = "ping #general"]
 #[only_in(guild)]
 async fn disable(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let data = ctx.data.read().await;
-    let db = data.get::<crate::Db>().unwrap();
-    let collection = db.collection::<Document>("guilds");
+    let collection = get_guilds!(ctx);
+
+    let guild_id = i64::from(msg.guild_id.unwrap());
 
     Ok(())
 }
 
 #[command]
 #[max_args(1)]
+#[description = "Changes or shows the prefix"]
+#[usage = "<\"your prefix\">"]
+#[example = "\"hello ae\""]
 #[only_in(guild)]
-async fn prefix(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let data = ctx.data.read().await;
-    let db = data.get::<crate::Db>().unwrap();
-    let collection = db.collection::<Document>("guilds");
-
-    let guild_id = i64::from(msg.guild_id.unwrap());
-
-    let prefix = match args.single_quoted::<String>() {
-        Ok(prefix) => prefix,
-        Err(_) => {
+async fn prefix(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let prefix = match args.remains() {
+        Some(prefix) => prefix,
+        None => {
             msg.reply(
                 ctx,
-                format!(
-                    "current prefix is {}",
-                    collection
-                        .find_one(doc! {"_id": guild_id}, FindOneOptions::builder().build())
-                        .await
-                        .unwrap()
-                        .unwrap()
-                        .get("prefix")
-                        .unwrap()
-                ),
+                format!("current prefix is {}", view_guild!(ctx, msg, "prefix")),
             )
             .await?;
             return Ok(());
         }
     };
 
-    let filter = doc! {"_id": guild_id};
     let update = doc! {"$set": {"prefix": &prefix}};
-    let options = FindOneAndUpdateOptions::builder().build();
-
-    let result = collection
-        .find_one_and_update(filter, update, options)
-        .await?;
-
-    if let None = result {
-        initialize_guild(&collection, guild_id, &prefix).await?;
-    }
+    update_guild!(ctx, msg, update);
 
     msg.reply(ctx, format!("Prefix changed to \"{}\"", prefix))
         .await?;
