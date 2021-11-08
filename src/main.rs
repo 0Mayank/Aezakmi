@@ -170,12 +170,10 @@ async fn initialize_guild(
     let the_doc = doc! {
         "_id": guild_id,
         "prefix": prefix,
-        "commands": {
-            "ping": {
-                "server": false,
-                "roles": [],
-                "channels": [],
-                "users": []
+        "disabled_commands": {
+            "all" : {
+                "server": false
+                //<#general> : [<!role1>, <!role2>, <&user1>]
             }
         }
     };
@@ -207,6 +205,51 @@ macro_rules! update_guild {
             .find_one_and_update(filter, $update, options)
             .await?
     }};
+
+    ($ctx:expr, $msg:expr, $update:expr, $collection:expr) => {{
+        let guild_id = i64::from($msg.guild_id.unwrap());
+
+        let filter = doc! {"_id": guild_id};
+        let options = FindOneAndUpdateOptions::builder().build();
+
+        $collection
+            .find_one_and_update(filter, $update, options)
+            .await?
+    }};
+}
+
+fn check_command(com: &str) -> bool {
+    let groups = [&META_GROUP, &MUSIC_GROUP];
+
+    for group in groups {
+        for cmd in group.options.commands {
+            if cmd.options.names.contains(&com) || com.to_lowercase() == "all" {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn check_channel(chan: &str) -> bool {
+    if chan.starts_with("<#")
+        && chan.ends_with(">")
+        && chan[3..(chan.len() - 1)].parse::<u64>().is_ok()
+    {
+        return true;
+    }
+    false
+}
+
+fn check_role_or_user(rolus: &str) -> bool {
+    if (rolus.starts_with("<@!") || rolus.starts_with("<@&"))
+        && rolus.ends_with(">")
+        && rolus[3..(rolus.len() - 1)].parse::<u64>().is_ok()
+    {
+        return true;
+    }
+    false
 }
 
 #[macro_export]

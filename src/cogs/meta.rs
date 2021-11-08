@@ -14,16 +14,19 @@ use serenity::{
     utils::{content_safe, Color, ContentSafeOptions},
 };
 
-use crate::{get_guilds, update_guild, view_guild};
+use crate::{
+    check_channel, check_command, check_role_or_user, get_guilds, update_guild, view_guild,
+};
 
 #[group]
 #[commands(ping, say, botinvite, enable, disable, prefix)]
 pub struct Meta;
 
+#[derive(Debug)]
 struct FilteredArgs<'a> {
-    commands: Option<&'a [&'a str]>,
-    channels: Option<&'a [&'a str]>,
-    role_user: Option<&'a [&'a str]>,
+    commands: Option<Vec<&'a str>>,
+    channels: Option<Vec<&'a str>>,
+    role_user: Option<Vec<&'a str>>,
 }
 
 #[macro_export]
@@ -50,45 +53,69 @@ macro_rules! filter_to_FilteredArgs {
 
         let filtered_args = if in_index.is_none() && for_index.is_none() {
             FilteredArgs {
-                commands: Some(&args[..]),
+                commands: Some(Vec::from(&args[..])),
                 channels: None,
                 role_user: None,
             }
         } else if in_index.is_none() {
             let for_index = for_index.unwrap();
             FilteredArgs {
-                commands: Some(&args[0..for_index]),
+                commands: Some(Vec::from(&args[0..for_index])),
                 channels: None,
-                role_user: Some(&args[(for_index + 1)..]),
+                role_user: Some(Vec::from(&args[(for_index + 1)..])),
             }
         } else if for_index.is_none() {
             let in_index = in_index.unwrap();
             FilteredArgs {
-                commands: Some(&args[0..in_index]),
-                channels: Some(&args[(in_index + 1)..]),
+                commands: Some(Vec::from(&args[0..in_index])),
+                channels: Some(Vec::from(&args[(in_index + 1)..])),
                 role_user: None,
             }
         } else if in_index > for_index {
             let in_index = in_index.unwrap();
             let for_index = for_index.unwrap();
             FilteredArgs {
-                commands: Some(&args[0..for_index]),
-                channels: Some(&args[(for_index + 1)..in_index]),
-                role_user: Some(&args[(in_index + 1)..]),
+                commands: Some(Vec::from(&args[0..for_index])),
+                role_user: Some(Vec::from(&args[(for_index + 1)..in_index])),
+                channels: Some(Vec::from(&args[(in_index + 1)..])),
             }
         } else {
             let in_index = in_index.unwrap();
             let for_index = for_index.unwrap();
             FilteredArgs {
-                commands: Some(&args[0..in_index]),
-                channels: Some(&args[(in_index + 1)..for_index]),
-                role_user: Some(&args[(for_index + 1)..]),
+                commands: Some(Vec::from(&args[0..in_index])),
+                channels: Some(Vec::from(&args[(in_index + 1)..for_index])),
+                role_user: Some(Vec::from(&args[(for_index + 1)..])),
             }
         };
 
         $f.commands = filtered_args.commands;
         $f.channels = filtered_args.channels;
         $f.role_user = filtered_args.role_user;
+
+        $f.commands = Some(
+            $f.commands
+                .unwrap_or(vec!["all"]) // not sure if i should keep these or not
+                .into_iter()
+                .filter(|&e| check_command(e))
+                .collect(),
+        );
+
+        $f.channels = Some(
+            $f.channels
+                .unwrap_or(vec!["all"])
+                .into_iter()
+                .filter(|&e| check_channel(e))
+                .collect(),
+        );
+
+        $f.role_user = Some(
+            $f.role_user
+                .unwrap_or(vec!["all"])
+                .into_iter()
+                .filter(|&e| check_role_or_user(e))
+                .collect(),
+        );
     };
 }
 
@@ -165,8 +192,6 @@ async fn enable(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     // ae enable c1, c2, c3 .. in #ch1, #ch2, ..
     let collection = get_guilds!(ctx);
 
-    let guild_id = i64::from(msg.guild_id.unwrap());
-
     if args.is_empty() {
         return Ok(());
     }
@@ -179,9 +204,26 @@ async fn enable(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
     filter_to_FilteredArgs!(args, f);
 
-    println!("{:?}", f.commands);
-    println!("{:?}", f.channels);
-    println!("{:?}", f.role_user);
+    let mut update_doc = Document::new();
+
+    let channels = f.channels.unwrap();
+
+    for cmd in f.commands.unwrap() {
+        update_doc.insert(
+            "$set",
+            doc!(format!("disabled_commands.{}.server", cmd): false), //? not working
+        );
+        for chan in &channels {
+            update_doc.insert(
+                "$set",
+                doc!(format!("disabled_commands.{}.{}", cmd, chan): f.role_user.clone().unwrap()),
+            );
+        }
+    }
+
+    let result = update_guild!(&ctx, &msg, update_doc, collection);
+
+    println!("{:?}", result);
 
     Ok(())
 }
